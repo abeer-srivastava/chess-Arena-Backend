@@ -1,94 +1,112 @@
-import { WebSocket } from "ws"
-import { Chess } from "chess.js";
-import { INIT_GAME,GAME_OVER, MOVE } from "./message.js";
+import WebSocket from 'ws';
+import { Chess } from 'chess.js';
+import { GAME_OVER, MOVE } from "./message.js";
 
-export class Game{
-    public player1:WebSocket;
-    public player2:WebSocket;
-    public board:Chess;
-    private startTime:Date;
-    private moveCnt=0
+export class Game {
+    public player1: WebSocket;
+    public player2: WebSocket;
+    public board: Chess;
+    public countMove = 0;
 
-
-    constructor(player1:WebSocket,player2:WebSocket){
-        this.player1=player1;
-        this.player2=player2;
-        this.board=new Chess();
-        this.startTime=new Date();
-
+    constructor(player1: WebSocket, player2: WebSocket) {
+        this.player1 = player1;
+        this.player2 = player2;
+        this.board = new Chess();
         this.player1.send(JSON.stringify({
-            type:INIT_GAME,
-            payload:{
-                color:"white"
+            type: 'INIT_GAME',
+            payload: {
+                color: "white"
             }
-        }))
+        }));
         this.player2.send(JSON.stringify({
-            type:INIT_GAME,
-            payload:{
-                color:"black"
+            type: 'INIT_GAME',
+            payload: {
+                color: "black"
             }
-        }))
+        }));
     }
 
-    makeMove(socket:WebSocket,move:{
-        from:string,
-        to:string
-    }){
+    makeMove(socket: WebSocket, move: {
+        from: string,
+        to: string
+    }) {
 
-        // if (even move count && socket is not player1) return;
-        if(this.moveCnt%2===0 && socket!==this.player1){
-            console.log("even move count and socket is not player1");
+        if (this.countMove % 2 === 0 && socket !== this.player1) {
+            console.log("Not player 1's turn");
             return;
         }
-        // if (odd move count && socket is not player2) return;
-        if(this.moveCnt%2===1 && socket!==this.player2){
-          console.log("odd move count and socket is not player2");
-
+        if (this.countMove % 2 === 1 && socket !== this.player2) {
+            console.log("Not player 2's turn");
             return;
         }
 
-        try{
+        if (this.countMove % 2 == 0) {
+            console.log("Player 1 Move");
+        } else {
+            console.log("Player 2 Move");
+        }
+
+        try {
             this.board.move(move);
-         
-        }catch(e){
-             console.error("Invalid move execution", e);
+        } catch (e) {
+            console.log("Invalid move:", e);
             return;
         }
 
-        if(this.board.isGameOver()){
-            this.player1.send(JSON.stringify({
-                type:GAME_OVER,
-                payload:{
-                    winner:this.board.turn()==="w"?"black":"white",
-                }
-            }))
-            this.player2.send(JSON.stringify({
-                 type:GAME_OVER,
-                payload:{
-                    winner:this.board.turn()==="w"?"black":"white",
-                }
-            }))
-            return;
+        const moveMessage = JSON.stringify({
+            type: MOVE,
+            payload: {
+                move: move,
+                board: this.board.fen()  
+            }
+        });
+
+        this.player1.send(moveMessage);
+        this.player2.send(moveMessage);
+
+        this.countMove++;
+
+        this.checkGameStatus();
+    }
+
+    checkGameStatus() {
+        let gameStatus = null;
+        let winner = null;
+
+        if (this.board.isCheckmate()) {
+            winner = this.countMove % 2 === 1 ? "white" : "black";
+            gameStatus = "checkmate";
         }
 
-        // if (even move count(that means the player1 made the move) then send to player2)
-        if(this.moveCnt%2===0){
-            this.player2.send(JSON.stringify({
-                type:MOVE,
-                payload:{
-                    move:move
-                }
-            }))
+        else if (this.board.isStalemate()) {
+            gameStatus = "stalemate";
         }
-        // if (odd move count(that means the player2 made the move) then send to player1)
-        else{
-            this.player1.send(JSON.stringify({
-                type:MOVE,
-                payload:{
-                    move:move
-                }
-            }))
+
+        else if (this.board.isDraw()) {
+            gameStatus = "draw";
         }
-        this.moveCnt++;
+
+        else if (this.board.isInsufficientMaterial()) {
+            gameStatus = "insufficient material";
+        }
+
+        else if (this.board.isThreefoldRepetition()) {
+            gameStatus = "threefold repetition";
+        }
+
+        if (gameStatus) {
+            const gameOverMessage = JSON.stringify({
+                type: GAME_OVER,
+                payload: {
+                    result: gameStatus,
+                    winner: winner,
+                    fen: this.board.fen()
+                }
+            });
+
+            this.player1.send(gameOverMessage);
+            this.player2.send(gameOverMessage);
+            console.log(`Game over: ${gameStatus}, Winner: ${winner || 'none'}`);
+        }
     }
 }
